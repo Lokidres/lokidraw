@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LokiDraw</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            overflow: hidden;
+            background: #f8f9fa;
+        }
+
+        #toolbar {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: white;
+            padding: 12px 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            z-index: 1000;
+            flex-wrap: wrap;
+        }
+
+        .tool-btn {
+            width: 40px;
+            height: 40px;
+            border: 2px solid #e1e4e8;
+            background: white;
+            border-radius: 8px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            transition: all 0.2s;
+        }
+
+        .tool-btn:hover {
+            background: #f6f8fa;
+            border-color: #6366f1;
+        }
+
+        .tool-btn.active {
+            background: #6366f1;
+            color: white;
+            border-color: #6366f1;
+        }
+
+        .separator {
+            width: 1px;
+            height: 30px;
+            background: #e1e4e8;
+            margin: 0 4px;
+        }
+
+        input[type="color"] {
+            width: 40px;
+            height: 40px;
+            border: 2px solid #e1e4e8;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+
+        input[type="range"] {
+            width: 100px;
+            height: 40px;
+        }
+
+        #canvas {
+            cursor: crosshair;
+            display: block;
+        }
+
+        .label {
+            font-size: 12px;
+            color: #6b7280;
+            margin: 0 4px;
+        }
+
+        #zoom-control {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: white;
+            padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .zoom-btn {
+            width: 32px;
+            height: 32px;
+            border: none;
+            background: #f6f8fa;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .zoom-btn:hover {
+            background: #e1e4e8;
+        }
+
+        #zoom-level {
+            font-size: 14px;
+            min-width: 50px;
+            text-align: center;
+            color: #374151;
+        }
+    </style>
+</head>
+<body>
+    <div id="toolbar">
+        <button class="tool-btn active" data-tool="pen" title="Kalem">✏️</button>
+        <button class="tool-btn" data-tool="line" title="Çizgi">📏</button>
+        <button class="tool-btn" data-tool="arrow" title="Ok">➡️</button>
+        <button class="tool-btn" data-tool="rectangle" title="Dikdörtgen">⬜</button>
+        <button class="tool-btn" data-tool="circle" title="Daire">⭕</button>
+        <button class="tool-btn" data-tool="text" title="Metin">T</button>
+        
+        <div class="separator"></div>
+        
+        <input type="color" id="colorPicker" value="#000000" title="Renk">
+        
+        <div class="separator"></div>
+        
+        <span class="label">Kalınlık:</span>
+        <input type="range" id="strokeWidth" min="1" max="20" value="2">
+        
+        <div class="separator"></div>
+        
+        <button class="tool-btn" id="eraser" title="Silgi">🧹</button>
+        <button class="tool-btn" id="undo" title="Geri Al">↶</button>
+        <button class="tool-btn" id="redo" title="Yinele">↷</button>
+        <button class="tool-btn" id="clear" title="Temizle">🗑️</button>
+        <button class="tool-btn" id="export" title="PNG İndir">💾</button>
+    </div>
+
+    <div id="zoom-control">
+        <button class="zoom-btn" id="zoom-out">−</button>
+        <span id="zoom-level">100%</span>
+        <button class="zoom-btn" id="zoom-in">+</button>
+        <button class="zoom-btn" id="zoom-reset" title="Sıfırla">⊙</button>
+    </div>
+
+    <canvas id="canvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        let currentTool = 'pen';
+        let isDrawing = false;
+        let startX, startY;
+        let strokeColor = '#000000';
+        let strokeWidth = 2;
+        let history = [];
+        let historyStep = -1;
+        let currentPath = [];
+        let zoom = 1;
+        let panX = 0;
+        let panY = 0;
+        let isPanning = false;
+        let lastPanX, lastPanY;
+
+        function saveState() {
+            historyStep++;
+            if (historyStep < history.length) {
+                history.length = historyStep;
+            }
+            history.push(canvas.toDataURL());
+        }
+
+        function restoreState(step) {
+            if (step >= 0 && step < history.length) {
+                const img = new Image();
+                img.src = history[step];
+                img.onload = () => {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    ctx.drawImage(img, 0, 0);
+                };
+                historyStep = step;
+            }
+        }
+
+        function drawArrow(x1, y1, x2, y2) {
+            const headlen = 15;
+            const angle = Math.atan2(y2 - y1, x2 - x1);
+            
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+            
+            ctx.beginPath();
+            ctx.moveTo(x2, y2);
+            ctx.lineTo(x2 - headlen * Math.cos(angle - Math.PI / 6), y2 - headlen * Math.sin(angle - Math.PI / 6));
+            ctx.moveTo(x2, y2);
+            ctx.lineTo(x2 - headlen * Math.cos(angle + Math.PI / 6), y2 - headlen * Math.sin(angle + Math.PI / 6));
+            ctx.stroke();
+        }
+
+        function getMousePos(e) {
+            const rect = canvas.getBoundingClientRect();
+            return {
+                x: (e.clientX - rect.left - panX) / zoom,
+                y: (e.clientY - rect.top - panY) / zoom
+            };
+        }
+
+        canvas.addEventListener('mousedown', (e) => {
+            if (e.button === 1 || (e.button === 0 && e.ctrlKey)) {
+                isPanning = true;
+                lastPanX = e.clientX;
+                lastPanY = e.clientY;
+                canvas.style.cursor = 'grab';
+                return;
+            }
+
+            const pos = getMousePos(e);
+            startX = pos.x;
+            startY = pos.y;
+            isDrawing = true;
+            currentPath = [];
+
+            if (currentTool === 'text') {
+                const text = prompt('Metni girin:');
+                if (text) {
+                    ctx.save();
+                    ctx.setTransform(zoom, 0, 0, zoom, panX, panY);
+                    ctx.font = `${strokeWidth * 10}px Arial`;
+                    ctx.fillStyle = strokeColor;
+                    ctx.fillText(text, startX, startY);
+                    ctx.restore();
+                    saveState();
+                }
+                isDrawing = false;
+                return;
+            }
+
+            if (currentTool === 'pen') {
+                ctx.save();
+                ctx.setTransform(zoom, 0, 0, zoom, panX, panY);
+                ctx.beginPath();
+                ctx.moveTo(startX, startY);
+                ctx.strokeStyle = strokeColor;
+                ctx.lineWidth = strokeWidth;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+            }
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (isPanning) {
+                const dx = e.clientX - lastPanX;
+                const dy = e.clientY - lastPanY;
+                panX += dx;
+                panY += dy;
+                lastPanX = e.clientX;
+                lastPanY = e.clientY;
+                redraw();
+                return;
+            }
+
+            if (!isDrawing) return;
+
+            const pos = getMousePos(e);
+
+            if (currentTool === 'pen') {
+                ctx.lineTo(pos.x, pos.y);
+                ctx.stroke();
+                currentPath.push({x: pos.x, y: pos.y});
+            } else {
+                redraw();
+                ctx.save();
+                ctx.setTransform(zoom, 0, 0, zoom, panX, panY);
+                ctx.strokeStyle = strokeColor;
+                ctx.lineWidth = strokeWidth;
+                ctx.lineCap = 'round';
+
+                if (currentTool === 'line') {
+                    ctx.beginPath();
+                    ctx.moveTo(startX, startY);
+                    ctx.lineTo(pos.x, pos.y);
+                    ctx.stroke();
+                } else if (currentTool === 'arrow') {
+                    drawArrow(startX, startY, pos.x, pos.y);
+                } else if (currentTool === 'rectangle') {
+                    ctx.strokeRect(startX, startY, pos.x - startX, pos.y - startY);
+                } else if (currentTool === 'circle') {
+                    const radius = Math.sqrt(Math.pow(pos.x - startX, 2) + Math.pow(pos.y - startY, 2));
+                    ctx.beginPath();
+                    ctx.arc(startX, startY, radius, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+                ctx.restore();
+            }
+        });
+
+        canvas.addEventListener('mouseup', (e) => {
+            if (isPanning) {
+                isPanning = false;
+                canvas.style.cursor = 'crosshair';
+                return;
+            }
+
+            if (!isDrawing) return;
+
+            const pos = getMousePos(e);
+
+            if (currentTool !== 'pen') {
+                ctx.save();
+                ctx.setTransform(zoom, 0, 0, zoom, panX, panY);
+                ctx.strokeStyle = strokeColor;
+                ctx.lineWidth = strokeWidth;
+                ctx.lineCap = 'round';
+
+                if (currentTool === 'line') {
+                    ctx.beginPath();
+                    ctx.moveTo(startX, startY);
+                    ctx.lineTo(pos.x, pos.y);
+                    ctx.stroke();
+                } else if (currentTool === 'arrow') {
+                    drawArrow(startX, startY, pos.x, pos.y);
+                } else if (currentTool === 'rectangle') {
+                    ctx.strokeRect(startX, startY, pos.x - startX, pos.y - startY);
+                } else if (currentTool === 'circle') {
+                    const radius = Math.sqrt(Math.pow(pos.x - startX, 2) + Math.pow(pos.y - startY, 2));
+                    ctx.beginPath();
+                    ctx.arc(startX, startY, radius, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+                ctx.restore();
+            } else {
+                ctx.restore();
+            }
+
+            isDrawing = false;
+            saveState();
+        });
+
+        canvas.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const delta = e.deltaY > 0 ? 0.9 : 1.1;
+            zoom *= delta;
+            zoom = Math.max(0.1, Math.min(5, zoom));
+            updateZoomDisplay();
+            redraw();
+        });
+
+        function redraw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (historyStep >= 0 && history[historyStep]) {
+                const img = new Image();
+                img.src = history[historyStep];
+                ctx.save();
+                ctx.setTransform(zoom, 0, 0, zoom, panX, panY);
+                ctx.drawImage(img, 0, 0);
+                ctx.restore();
+            }
+        }
+
+        function updateZoomDisplay() {
+            document.getElementById('zoom-level').textContent = Math.round(zoom * 100) + '%';
+        }
+
+        document.querySelectorAll('.tool-btn[data-tool]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.tool-btn[data-tool]').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentTool = btn.dataset.tool;
+            });
+        });
+
+        document.getElementById('colorPicker').addEventListener('change', (e) => {
+            strokeColor = e.target.value;
+        });
+
+        document.getElementById('strokeWidth').addEventListener('input', (e) => {
+            strokeWidth = e.target.value;
+        });
+
+        document.getElementById('eraser').addEventListener('click', () => {
+            currentTool = 'pen';
+            strokeColor = '#ffffff';
+            strokeWidth = 20;
+        });
+
+        document.getElementById('undo').addEventListener('click', () => {
+            if (historyStep > 0) {
+                restoreState(historyStep - 1);
+            }
+        });
+
+        document.getElementById('redo').addEventListener('click', () => {
+            if (historyStep < history.length - 1) {
+                restoreState(historyStep + 1);
+            }
+        });
+
+        document.getElementById('clear').addEventListener('click', () => {
+            if (confirm('Tüm çizimleri silmek istediğinize emin misiniz?')) {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                saveState();
+            }
+        });
+
+        document.getElementById('export').addEventListener('click', () => {
+            const link = document.createElement('a');
+            link.download = 'lokidraw-' + Date.now() + '.png';
+            link.href = canvas.toDataURL();
+            link.click();
+        });
+
+        document.getElementById('zoom-in').addEventListener('click', () => {
+            zoom *= 1.2;
+            zoom = Math.min(5, zoom);
+            updateZoomDisplay();
+            redraw();
+        });
+
+        document.getElementById('zoom-out').addEventListener('click', () => {
+            zoom *= 0.8;
+            zoom = Math.max(0.1, zoom);
+            updateZoomDisplay();
+            redraw();
+        });
+
+        document.getElementById('zoom-reset').addEventListener('click', () => {
+            zoom = 1;
+            panX = 0;
+            panY = 0;
+            updateZoomDisplay();
+            redraw();
+        });
+
+        window.addEventListener('resize', () => {
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = canvas.width;
+            tempCanvas.height = canvas.height;
+            tempCanvas.getContext('2d').drawImage(canvas, 0, 0);
+            
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            
+            ctx.drawImage(tempCanvas, 0, 0);
+        });
+
+        saveState();
+    </script>
+</body>
+</html>
